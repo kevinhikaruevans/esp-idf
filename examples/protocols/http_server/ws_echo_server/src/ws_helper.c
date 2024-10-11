@@ -5,7 +5,7 @@
 #include "esp_log.h"
 #include "ws_helper.h"
 
-#define USE_MUTEX
+// #define USE_MUTEX
 
 static const char* TAG = "ws";
 
