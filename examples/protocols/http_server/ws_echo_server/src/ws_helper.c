@@ -5,9 +5,15 @@
 #include "esp_log.h"
 #include "ws_helper.h"
 
+#define USE_MUTEX
+
 static const char* TAG = "ws";
 
 static httpd_handle_t* s_current_httpd_handle = NULL;
+
+#ifdef USE_MUTEX
+static SemaphoreHandle_t s_write_mutex = NULL;
+#endif
 
 /**
  * @brief Checks if an fd is valid
@@ -72,21 +78,34 @@ static size_t ws_broadcast_frame(httpd_req_t* req, httpd_ws_frame_t frame) {
         req_fd = httpd_req_to_sockfd(req);
     }
 
-    for (size_t i = 0; i < ws_count; i++) {
-        if (fds[i] == req_fd) {
-            // ignore the initiator
-            continue;
-        }
-        err = httpd_ws_send_frame_async(*s_current_httpd_handle, fds[i], &frame);
+#ifdef USE_MUTEX
+    if (s_write_mutex != NULL && xSemaphoreTake(s_write_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+#endif
 
-        vTaskDelay(1);
+        for (size_t i = 0; i < ws_count; i++) {
+            if (fds[i] == req_fd) {
+                // ignore the initiator
+                continue;
+            }
+            err = httpd_ws_send_frame_async(*s_current_httpd_handle, fds[i], &frame);
 
-        if (err == ESP_OK) {
-            successes++;
-        } else {
-            ESP_LOGW(TAG, "failed to send ws frame to fd=%d", fds[i]);
+            vTaskDelay(1);
+
+            if (err == ESP_OK) {
+                successes++;
+            } else {
+                ESP_LOGW(TAG, "failed to send ws frame to fd=%d", fds[i]);
+            }
         }
+
+
+#ifdef USE_MUTEX
+        xSemaphoreGive(s_write_mutex);
+    } else {
+        ESP_LOGW(TAG, "failed to get write mutex within timeout");
     }
+#endif
+
     return successes;
 }
 
@@ -114,6 +133,10 @@ size_t ws_broadcast_str(httpd_req_t* req, const char* str) {
 
 esp_err_t ws_helper_init(httpd_handle_t *handle) {
     s_current_httpd_handle = handle;
+
+#ifdef USE_MUTEX
+    s_write_mutex = xSemaphoreCreateMutex();
+#endif
 
     return ESP_OK;
 }
