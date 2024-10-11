@@ -13,6 +13,10 @@
 #include <esp_system.h>
 #include <nvs_flash.h>
 #include <sys/param.h>
+
+#include <time.h>
+#include "ws_helper.h"
+
 #include "esp_netif.h"
 #include "esp_eth.h"
 #include "protocol_examples_common.h"
@@ -178,6 +182,20 @@ static void connect_handler(void* arg, esp_event_base_t event_base,
 }
 
 
+static void test_task(void *params) {
+    uint32_t index = (uint32_t)params;
+    char message[32] = {0};
+    sprintf(message, "{\"index\": %" PRId32 ", \"time\": %" PRId32 "}", index, (uint32_t)time(NULL));
+
+    while(true) {
+        ws_broadcast_str(NULL, message);
+
+        // portYIELD();
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+}
+
 void app_main(void)
 {
     static httpd_handle_t server = NULL;
@@ -191,7 +209,23 @@ void app_main(void)
      * examples/protocols/README.md for more information about this function.
      */
     ESP_ERROR_CHECK(example_connect());
+    
+    ESP_ERROR_CHECK(ws_helper_init(&server));
 
+    for(uint32_t i = 0; i < 3; i++) {
+        BaseType_t ret = xTaskCreate(
+            test_task,
+            NULL,
+            4096,
+            (void *)i,
+            10,
+            NULL
+        );
+
+        if (ret != pdPASS) {
+            ESP_LOGE(TAG, "failed to create task");
+        }
+    }
     /* Register event handlers to stop the server when Wi-Fi or Ethernet is disconnected,
      * and re-start it upon connection.
      */
